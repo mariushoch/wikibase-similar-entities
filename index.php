@@ -55,7 +55,13 @@ if ( !isset( $entityData['entities'][$entityId] ) ) {
 }
 $entityData = $entityData['entities'][$entityId];
 
-$conditionBuilder = new ConditionBuilder();
+$sortedPropertiesRaw = file_get_contents(
+	'https://www.wikidata.org/w/index.php?title=MediaWiki:Wikibase-SortedProperties&action=raw&sp_ver=1'
+);
+preg_match_all( '/\n\* (P[1-9]\d*)/', $sortedPropertiesRaw, $sortedProperties );
+$sortedProperties = $sortedProperties[1];
+
+$conditionBuilder = new ConditionBuilder( $sortedProperties );
 $conditions = $conditionBuilder->getConditions( $entityData );
 
 $conditionCount = count( $conditions['value-relevant'] ) + count( $conditions['value-irrelevant'] );
@@ -93,18 +99,18 @@ $results = [];
 $queryBuilder = new QueryBuilder( 4000 );
 
 // Step 1: Has all conditions
-$conditionsToConsider = array_merge( $conditions['value-relevant'], $conditions['value-irrelevant'] );
+$conditionsToConsider = $conditions['value-relevant'] + $conditions['value-irrelevant'];
 $query = $queryBuilder->buildQuery(
 	[ '?item' ],
 	injectGeneralConditions( $conditionsToConsider ),
-	10
+	$limit
 );
 
 $results = $queryRunner->getItemsForQuery( $query );
 handleResults( $results, $limit );
 
 // Step 2: Has n-1 conditions
-if ( count( $conditionsToConsider ) < 12 ) {
+if ( count( $conditionsToConsider ) < 15 ) {
 	$queryUnionParts = [];
 	for ( $i = 0; $i < count( $conditionsToConsider ); $i++ ) {
 		$conditionsToConsiderClone = $conditionsToConsider;
@@ -113,7 +119,7 @@ if ( count( $conditionsToConsider ) < 12 ) {
 		$queryUnionParts[] = injectGeneralConditions( $conditionsToConsiderClone );
 	}
 
-	$queries = $queryBuilder->buildUnionQueries( [ '?item' ], $queryUnionParts, 10 );
+	$queries = $queryBuilder->buildUnionQueries( [ '?item' ], $queryUnionParts, $limit );
 
 	foreach ( $queries as $query ) {
 		$results = array_merge( $results, $queryRunner->getItemsForQuery( $query ) );
@@ -122,19 +128,20 @@ if ( count( $conditionsToConsider ) < 12 ) {
 	}
 }
 
-// Step 3: Has all value relevant conditions
+// Step 3: Has all value-relevant conditions
 $query = $queryBuilder->buildQuery(
 	[ '?item' ],
 	injectGeneralConditions( $conditions['value-relevant'] ),
-	10
+	$limit
 );
 
-$results = $queryRunner->getItemsForQuery( $query );
+$results = array_merge( $results, $queryRunner->getItemsForQuery( $query ) );
+$results = array_unique( $results );
 handleResults( $results, $limit );
 
-// Step 4: Remove 15%, 25%, 35%, 60%, 70% and 80% of the conditions (at random)
+// Step 4: Remove 25%, 35%, 60%, 70% and 80% of the conditions
 $queryUnionParts = [];
-foreach ( [ 0.85, 0.75, 0.65, 0.55, 0.4, 0.3, 0.2 ] as $reductionFactor ) {
+foreach ( [ 0.75, 0.65, 0.55, 0.4, 0.3, 0.2 ] as $reductionFactor ) {
 	$numberOfConditions = round( count( $conditionsToConsider ) * $reductionFactor );
 	if ( !$numberOfConditions ) {
 		break;
@@ -144,17 +151,30 @@ foreach ( [ 0.85, 0.75, 0.65, 0.55, 0.4, 0.3, 0.2 ] as $reductionFactor ) {
 		continue;
 	}
 
-	// $conditionCount runs for this seem a good trade-off
-	// between run time and result quality.
-	for ( $i = 0; $i < min( 18, $conditionCount ); $i++ ) {
-		$conditionsToConsiderClone = $conditionsToConsider;
-		shuffle( $conditionsToConsiderClone );
-		$conditionsToConsiderClone = array_slice( $conditionsToConsiderClone, 0, $numberOfConditions );
-
-		$queryUnionParts[] = injectGeneralConditions( $conditionsToConsiderClone );
+	// First try to remove the least important conditions...
+	ksort( $conditionsToConsider );
+	$queryUnionParts[] = injectGeneralConditions(
+		array_slice( $conditionsToConsider, 0, $numberOfConditions )
+	);
+	// if that doesn't work, try dropping conditions randomly.
+	for ( $i = 0; $i < min( 14, $conditionCount ); $i++ ) {
+		$conditionsToConsiderClone = [];
+		for ( $j = 0; $j < $numberOfConditions; $j++ ) {
+			$desicionBarrier = mt_rand() / mt_getrandmax();
+			// Scale by y = x * sqrt(0.8) + 0.6 (y integrated from 0 to 1 is 1)
+			// This makes it more likely for less relevant conditions to
+			// be purged, but keeps the overall reduction factor into account.
+			$desicionBarrier *= ( $j / $numberOfConditions ) * sqrt( 0.8 ) + 0.6;
+			if ( $desicionBarrier < $reductionFactor ) {
+				$conditionsToConsiderClone[] = array_values( $conditionsToConsider )[$j];
+			}
+		}
+		if ( $conditionsToConsiderClone ) {
+			$queryUnionParts[] = injectGeneralConditions( $conditionsToConsiderClone );
+		}
 	}
 
-	$queries = $queryBuilder->buildUnionQueries( [ '?item' ], $queryUnionParts, 10 );
+	$queries = $queryBuilder->buildUnionQueries( [ '?item' ], $queryUnionParts, $limit );
 
 	foreach ( $queries as $query ) {
 		$results = array_merge( $results, $queryRunner->getItemsForQuery( $query ) );

@@ -46,7 +46,7 @@ class QueryBuilder {
         $chunkSize = count( $conditionsPerQuery );
         while ( $conditionsPerQuery ) {
             $conditionsPerQueryChunk = array_slice( $conditionsPerQuery, 0, $chunkSize );
-            $query = 'SELECT ' . implode( ' ', $fields ) . " WHERE {\n";
+            $query = 'SELECT DISTINCT ' . implode( ' ', $fields ) . " WHERE {\n";
 
             $unionParts = [];
             foreach ( $conditionsPerQueryChunk as $conditions ) {

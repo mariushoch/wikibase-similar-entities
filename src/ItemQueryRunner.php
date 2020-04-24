@@ -38,16 +38,17 @@ class ItemQueryRunner {
     /**
      * @param string $query
      *
-     * @return string JSON
+     * @return string[] item ids
      */
     public function getItemsForQuery( string $query ): array {
         $json = $this->doQuery( $query );
         $data = json_decode( $json, true );
-        
+
         $result = [];
         foreach ( $data['results']['bindings'] as $value ) {
             $result[] = $value['item']['value'];
         }
+
         return $result;
     }
 

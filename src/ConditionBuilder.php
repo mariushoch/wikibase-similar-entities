@@ -8,11 +8,27 @@ use RuntimeException;
 class ConditionBuilder {
 
     /**
+     * @var string[]
+     */
+    private $sortedProperties;
+
+    /**
+     * @var int
+     */
+    private $counter;
+
+    public function __construct( array $sortedProperties ) {
+        $this->sortedProperties = $sortedProperties;
+        $this->counter = 0;
+    }
+
+    /**
      * @param array $entityData As obtained via Special:EntityData
      *
      * @return string[][] SPARQL WHERE conditions
      */
     public function getConditions( array $entityData ): array {
+        $this->counter = 0;
         if ( !isset( $entityData['claims'] ) ) {
             throw new RuntimeException( 'Given entity data has no claims.' );
         }
@@ -51,16 +67,24 @@ class ConditionBuilder {
                     continue;
                 }
                 $dataValueType = $mainSnak['datavalue']['type'];
+
+                $key = array_search( $propertyId, $this->sortedProperties, true );
+                if ( $key ) {
+                    $key = $key * 100e9 + $this->counter;
+                } else {
+                    $key = count( $this->sortedProperties ) * 100e9 + $this->counter;
+                }
                 if ( $dataValueType === 'wikibase-entityid' ) {
                     $id = $mainSnak['datavalue']['value']['id'];
-                    $newConditions['value-relevant'][] = "?item wdt:$propertyId wd:$id .";
+                    $newConditions['value-relevant'][$key] = "?item wdt:$propertyId wd:$id .";
                 } else {
                     $bytes = random_bytes( 6 );
                     $varName = bin2hex( $bytes );
-                    $newConditions['value-irrelevant'][] = "?item wdt:$propertyId ?$varName .";
+                    $newConditions['value-irrelevant'][$key] = "?item wdt:$propertyId ?$varName .";
                 }
             }
-            $conditions = array_merge_recursive( $conditions, $newConditions );
+            $conditions['value-relevant'] = $conditions['value-relevant'] + $newConditions['value-relevant'];
+            $conditions['value-irrelevant'] = $conditions['value-irrelevant'] + $newConditions['value-irrelevant'];
         }
 
         return $conditions;
