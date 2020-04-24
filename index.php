@@ -35,6 +35,7 @@ if ( !$entityId ) {
 				</div>
 				<input type="submit" value="Find entities" class="btn btn-primary">
 			</form>
+			<small>Source code can be found at <a href="https://github.com/mariushoch/wikibase-similar-entities">github.com/mariushoch/wikibase-similar-entities</a>.</small>
 		</div>
 	</body>
 </html>
